@@ -1,14 +1,16 @@
 const Sauce = require('../models/Sauce');
-const { delete } = require('../routes/user');
+const fs = require('fs');
+const { render } = require('../app');
 
 exports.createSauce = (req, res, next) => {
-  delete req.body._id;
+  const sauceObject = JSON.parse(req.body.sauce);
   const sauce = new Sauce({
-    ...req.body
+    ...sauceObject,
+    imageUrl: `${req.protocol}://${req.get('host')}/images/${req.file.filename}`
   });
   sauce.save()
-    .then(() => res.status(201).json({ message: 'Votre sauce est enregistré !' }))
-    .catch(error) => res.status(400).json({ error }));
+    .then(() => res.status(201).json({ message: 'Sauce enregistré !'}))
+    .catch(error => res.status(400).json({ error }));
 };
 
 exports.getOneSauce = (req, res, next) => {
@@ -18,19 +20,80 @@ exports.getOneSauce = (req, res, next) => {
 };
 
 exports.modifySauce = (req, res, next) => {
-  Sauce.updateOne({ _id: req.params.id }, { ...req.body, _id: req.params.id })
-    .then(() => res.status(200).json({ message: 'Votre sauce à été modifié !'}))
-    .catch(error) => res.status(400).json({ error }));
+  const sauceObject = req.file ?
+    {
+      ...JSON.parse(req.body.sauce),
+      imageUrl: `${req.protocol}://${req.get('host')}/images/${req.file.filename}`
+    } : { ...req.body };
+  Sauce.updateOne({ _id: req.params.id }, { ...sauceObject, _id: req.params.id })
+    .then(() => res.status(200).json({ message: 'Votre sauce est modifié !'}))
+    .catch(error => res.status(400).json({ error }));
 };
 
 exports.deleteSauce = (req, res, next) => {
-  Sauce.deleteOne({_id: req.params.id})
-  .then(() => res.status(200).json({ message: 'Votre sauce à été supprimé !' }))
-  .catch(error) => res.status(400).json({ error }));
+  Sauce.findOne({ _id: req.params.id })
+    .then(sauce => {
+      const filename = sauce.imageUrl.split('/images/')[1];
+      fs.unlink(`images/${filename}`, () => {
+        Sauce.deleteOne({ _id: req.params.id })
+          .then(() => res.status(200).json({ message: 'Votre sauce est supprimé !'}))
+          .catch(error => res.status(400).json({ error }));
+      });
+    })
+    .catch(error => res.status(500).json({ error }));
 };
 
-exports.getAllStuff = (req, res, next) => {
+exports.getAllSauces = (req, res, next) => {
   Sauce.find()
   .then(sauces => res.status(200).json(sauces))
-  .catch(error) => res.status(400).json({ error }));
+  .catch(error => res.status(400).json({ error }));
 };
+
+exports.likeSauce = (req, res) => {
+  switch (req.body.like) {
+    case 0:
+      Sauce.findOne({ _id: req.params.id })
+        .then((sauce) => {
+          if (sauce.usersLiked.find( user => user === req.body.userId)) {
+            Sauce.updateOne({ _id: req.params.id }, {
+              $inc: { likes: -1 },
+              $pull: { usersLiked: req.body.userId }
+            })
+            .then(() => res.status(201).json({ message: "Vôtre vote est enregistré !" }))
+            .catch(() => res.status(400).json({ error }));
+          }
+          if (sauce.usersDisliked.find( user => user === req.body.userId)) {
+            Sauce.updateOne({ _id: req.params.id }, {
+              $inc: { dislikes: -1 },
+              $pull: { usersDisliked: req.body.userId }
+            })
+            .then(() => res.status(201).json({ message: "Vôtre vote est enregistré !" }))
+            .catch(() => res.status(400).json({ error }));
+          }
+        })
+        .catch(() => res.status(404).json({ error }));
+      break;
+
+    case 1:
+      Sauce.updateOne({ _id: req.params.id }, {
+        $inc: { likes: 1 },
+        $push: { usersLiked: req.body.userId }
+      })
+      .then(() => res.status(201).json({ message: "Vôtre vote est enregistré !"}))
+      .catch(() => res.status(400).json({ error }));
+      break;
+
+    case -1:
+      Sauce.updateOne({ _id: req.params.id }, {
+        $inc: { dislikes: 1 },
+        $push: { usersDisliked: req.body.userId }
+      })
+      .then(() => res.status(200).json({ message: "Vôtre vote est enregistré !"}))
+      .catch(() => res.status(400).json({ error }));
+      break;
+    default:
+      console.error("mauvaise requête");
+  }
+};
+
+
